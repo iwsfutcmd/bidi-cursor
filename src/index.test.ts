@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { log, vis, type Direction, type Side } from "./index";
+import type { Direction, Side } from "./utils";
+import { log, vis } from "./index";
 
 const testInputs = [
   "aאbבcגdדeהfוgזh",

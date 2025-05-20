@@ -639,30 +639,45 @@ var friBidiResult = (input, baseDir) => {
 };
 var fribidiFunctions_default = { friBidiResult };
 
-// src/index.ts
-var fribidiResult = fribidiFunctions_default.friBidiResult;
-var LRE = "\u202A";
-var RLE = "\u202B";
-var LRO = "\u202D";
-var RLO = "\u202E";
-var PDF = "\u202C";
-var LRM = "\u200E";
-var RLM = "\u200F";
-var ALM = "\u061C";
-var LRI = "\u2066";
-var RLI = "\u2067";
-var FSI = "\u2068";
-var PDI = "\u2069";
+// src/utils.ts
+var BidiControls = {
+  LRE: "\u202A",
+  RLE: "\u202B",
+  LRO: "\u202D",
+  RLO: "\u202E",
+  PDF: "\u202C",
+  LRM: "\u200E",
+  RLM: "\u200F",
+  ALM: "\u061C",
+  LRI: "\u2066",
+  RLI: "\u2067",
+  FSI: "\u2068",
+  PDI: "\u2069"
+};
+var controlType = {
+  isolate: [
+    [BidiControls.LRI, BidiControls.PDI],
+    [BidiControls.RLI, BidiControls.PDI]
+  ],
+  embedding: [
+    [BidiControls.LRE, BidiControls.PDF],
+    [BidiControls.RLE, BidiControls.PDF]
+  ],
+  override: [
+    [BidiControls.LRO, BidiControls.PDF],
+    [BidiControls.RLO, BidiControls.PDF]
+  ]
+};
 var isLTR = (logPos, levels) => !(levels[logPos] % 2);
 var isRTL = (logPos, levels) => !!(levels[logPos] % 2);
-var removeChar = (logPos, input) => {
+var remove = (logPos, input) => {
   if (logPos >= 0 && logPos < [...input].length) {
     return [...input.slice(0, logPos), ...input.slice(logPos + 1)].join("");
   } else {
     return input;
   }
 };
-var insertChar = (char, logPos, input) => {
+var insert = (char, logPos, input) => {
   if (logPos >= 0 && logPos <= [...input].length) {
     return [...input.slice(0, logPos), char, ...input.slice(logPos)].join("");
   } else {
@@ -670,7 +685,7 @@ var insertChar = (char, logPos, input) => {
   }
 };
 var getCharLevel = (char, logPos, input, dir) => {
-  const testInput = insertChar(char, logPos, input);
+  const testInput = insert(char, logPos, input);
   const { levels } = fribidiFunctions_default.friBidiResult(testInput, dir);
   return levels[logPos];
 };
@@ -735,192 +750,42 @@ var visPosRight = (visPos, input, n = 1) => {
 var visPosLeft = (visPos, n = 1) => {
   return Math.max(visPos - n, 0);
 };
-var visInsertChar = (char, state) => {
-  const derivedLogPos = deriveLogPos(state.visPos, state.input, state.dir);
-  const level = getCharLevel(char, derivedLogPos[0], state.input, state.dir);
-  const input = insertChar(char, derivedLogPos[level % 2], state.input);
-  const visPos = level % 2 ? state.visPos : visPosRight(state.visPos, input);
-  return {
-    ...state,
-    input,
-    visPos,
-    lean: level % 2 ? "left" : "right"
-  };
-};
-var logInsertChar = (char, state) => {
-  const input = insertChar(char, state.logPos, state.input);
+
+// src/log.ts
+var insertChar = (char, state) => {
+  const input = insert(char, state.logPos, state.input);
   return {
     ...state,
     input,
     logPos: logPosForward(state.logPos, input, [...char].length)
   };
 };
-var visInsertChar2 = (char, state) => {
-  if (state.visPos[0] !== state.visPos[1]) {
-    const tempState = logInsertChar(char, {
-      input: state.input,
-      dir: state.dir,
-      logPos: state.logPos[0]
-    });
-    return {
-      ...state,
-      input: tempState.input,
-      visPos: deriveVisPos(tempState.logPos, tempState.input, tempState.dir),
-      logPos: [tempState.logPos, tempState.logPos]
-    };
-  } else {
-    const tempState = visInsertChar(char, {
-      input: state.input,
-      dir: state.dir,
-      visPos: state.visPos[0],
-      lean: state.lean
-    });
-    const logPos = deriveLogPos(
-      tempState.visPos,
-      tempState.input,
-      tempState.dir
-    )[tempState.lean === "left" ? 0 : 1];
-    return {
-      ...state,
-      input: tempState.input,
-      visPos: [tempState.visPos, tempState.visPos],
-      logPos: [logPos, logPos],
-      lean: tempState.lean
-    };
-  }
-};
-var logBackspace = (state) => ({
+var backspace = (state) => ({
   ...state,
-  input: removeChar(state.logPos - 1, state.input),
+  input: remove(state.logPos - 1, state.input),
   logPos: logPosBackward(state.logPos)
 });
-var logDelete = (state) => ({
+var deleteKey = (state) => ({
   ...state,
-  input: removeChar(state.logPos, state.input)
+  input: remove(state.logPos, state.input)
 });
-var visBackspace = (state) => {
-  const derivedLogPos = deriveLogPos(state.visPos, state.input, state.dir);
-  const { levels } = fribidiFunctions_default.friBidiResult(state.input, state.dir);
-  if (isLTR(derivedLogPos[0], levels) && isRTL(derivedLogPos[1], levels)) {
-    return state;
-  }
-  const charToRemove = state.lean === "left" ? derivedLogPos[1] - 1 : derivedLogPos[0] - 1;
-  return {
-    ...state,
-    input: removeChar(charToRemove, state.input),
-    visPos: isLTR(charToRemove, levels) ? state.visPos - 1 : state.visPos
-  };
-};
-var visDelete = (state) => {
-  const derivedLogPos = deriveLogPos(state.visPos, state.input, state.dir);
-  const { levels } = fribidiFunctions_default.friBidiResult(state.input, state.dir);
-  if (isRTL(derivedLogPos[0], levels) && isLTR(derivedLogPos[1], levels)) {
-    return state;
-  }
-  const charToRemove = state.lean === "left" ? derivedLogPos[1] : derivedLogPos[0];
-  return {
-    ...state,
-    input: removeChar(charToRemove, state.input),
-    visPos: isRTL(charToRemove, levels) ? state.visPos - 1 : state.visPos
-  };
-};
-var visBackspace2 = (state) => {
-  if (state.logPos[0] !== [...state.input].length) {
-    if (state.visPos[0] !== state.visPos[1]) throw new Error("Invalid visPos");
-    const tempState = visBackspace({
-      input: state.input,
-      dir: state.dir,
-      visPos: state.visPos[0],
-      lean: state.lean
-    });
-    return {
-      ...state,
-      input: tempState.input,
-      visPos: [tempState.visPos, tempState.visPos],
-      logPos: deriveLogPos(tempState.visPos, tempState.input, tempState.dir)
-    };
-  } else {
-    if (state.logPos[0] !== state.logPos[1]) throw new Error("Invalid logPos");
-    const tempState = logBackspace({
-      input: state.input,
-      dir: state.dir,
-      logPos: state.logPos[0]
-    });
-    return {
-      ...state,
-      input: tempState.input,
-      visPos: deriveVisPos(tempState.logPos, tempState.input, tempState.dir),
-      logPos: [tempState.logPos, tempState.logPos]
-    };
-  }
-};
-var visDelete2 = (state) => {
-  const derivedLogPos = deriveLogPos(state.visPos[0], state.input, state.dir);
-  const { levels } = fribidiFunctions_default.friBidiResult(state.input, state.dir);
-  if (isRTL(derivedLogPos[0], levels) && isLTR(derivedLogPos[1], levels)) {
-    return state;
-  }
-  const charToRemove = state.lean === "left" ? derivedLogPos[1] : derivedLogPos[0];
-  const visPos = isRTL(charToRemove, levels) ? state.visPos[0] - 1 : state.visPos[0];
-  return {
-    ...state,
-    input: removeChar(charToRemove, state.input),
-    visPos: [visPos, visPos]
-  };
-};
-var controlType = {
-  isolate: [
-    [LRI, PDI],
-    [RLI, PDI]
-  ],
-  embedding: [
-    [LRE, PDF],
-    [RLE, PDF]
-  ],
-  override: [
-    [LRO, PDF],
-    [RLO, PDF]
-  ]
-};
-var visInsertCharSpecial = (char, type, state) => {
-  const derivedLogPos = deriveLogPos(state.visPos, state.input, state.dir);
-  const level = getCharLevel(char, derivedLogPos[0], state.input, state.dir);
-  const [startChar, endChar] = controlType[type][level % 2];
-  if (!(level % 2)) {
-    return {
-      ...state,
-      input: insertChar(
-        startChar + char + endChar,
-        derivedLogPos[0],
-        state.input
-      ),
-      visPos: visPosRight(state.visPos, state.input)
-    };
-  } else if (level % 2) {
-    return {
-      ...state,
-      input: insertChar(
-        startChar + char + endChar,
-        derivedLogPos[1],
-        state.input
-      ),
-      visPos: visPosLeft(state.visPos)
-    };
-  } else {
-    throw new Error("Invalid level");
-  }
-};
-var logArrowLeft = (state) => ({
+var arrowLeft = (state) => ({
   ...state,
   logPos: logPosBackward(state.logPos, 1)
 });
-var logArrowRight = (state) => {
-  return {
-    ...state,
-    logPos: logPosForward(state.logPos, state.input, 1)
-  };
-};
-var logClick = (clickedVisPos, side, state) => {
+var arrowRight = (state) => ({
+  ...state,
+  logPos: logPosForward(state.logPos, state.input, 1)
+});
+var home = (state) => ({
+  ...state,
+  logPos: 0
+});
+var end = (state) => ({
+  ...state,
+  logPos: [...state.input].length
+});
+var click = (clickedVisPos, side, state) => {
   const { v2lMap, levels } = fribidiFunctions_default.friBidiResult(
     state.input,
     state.dir
@@ -940,56 +805,7 @@ var logClick = (clickedVisPos, side, state) => {
     throw new Error("Invalid side");
   }
 };
-var visArrowLeft = (state) => ({
-  ...state,
-  visPos: visPosLeft(state.visPos, 1),
-  lean: "left"
-});
-var visArrowLeft2 = (state) => {
-  const primaryVisPos = state.visPos[state.lean === "left" ? 0 : 1];
-  const newVisPos = visPosLeft(primaryVisPos);
-  return {
-    ...state,
-    visPos: [newVisPos, newVisPos],
-    logPos: deriveLogPos(newVisPos, state.input, state.dir),
-    lean: "left"
-  };
-};
-var visArrowRight = (state) => ({
-  ...state,
-  visPos: visPosRight(state.visPos, state.input),
-  lean: "right"
-});
-var visArrowRight2 = (state) => {
-  const primaryVisPos = state.visPos[state.lean === "left" ? 0 : 1];
-  const newVisPos = visPosRight(primaryVisPos, state.input);
-  return {
-    ...state,
-    visPos: [newVisPos, newVisPos],
-    logPos: deriveLogPos(newVisPos, state.input, state.dir),
-    lean: "right"
-  };
-};
-var visClick = (clickedVisPos, side, state) => {
-  if (side === "left") {
-    return { ...state, visPos: clickedVisPos, lean: side };
-  } else if (side === "right") {
-    return { ...state, visPos: clickedVisPos + 1, lean: side };
-  } else {
-    throw new Error("Invalid side");
-  }
-};
-var visClick2 = (clickedVisPos, side, state) => {
-  const newVisPos = side === "left" ? clickedVisPos : side === "right" ? clickedVisPos + 1 : null;
-  if (newVisPos === null) throw new Error("Invalid side");
-  return {
-    ...state,
-    visPos: [newVisPos, newVisPos],
-    logPos: deriveLogPos(newVisPos, state.input, state.dir),
-    lean: side
-  };
-};
-var logClickOnLog = (clickedLogPos, side, state) => {
+var clickOnLog = (clickedLogPos, side, state) => {
   if (side === "left") {
     return { ...state, logPos: clickedLogPos };
   } else if (side === "right") {
@@ -998,8 +814,112 @@ var logClickOnLog = (clickedLogPos, side, state) => {
     throw new Error("Invalid side");
   }
 };
-var visClickOnLog = (clickedLogPos, side, state) => {
-  const { levels } = fribidiResult(state.input, state.dir);
+var log_default = {
+  arrowLeft,
+  arrowRight,
+  insertChar,
+  backspace,
+  deleteKey,
+  home,
+  end,
+  click,
+  debug: { clickOnLog }
+};
+
+// src/vis.ts
+var insertChar2 = (char, state) => {
+  const derivedLogPos = deriveLogPos(state.visPos, state.input, state.dir);
+  const level = getCharLevel(char, derivedLogPos[0], state.input, state.dir);
+  const input = insert(char, derivedLogPos[level % 2], state.input);
+  const visPos = level % 2 ? state.visPos : visPosRight(state.visPos, input);
+  return {
+    ...state,
+    input,
+    visPos,
+    lean: level % 2 ? "left" : "right"
+  };
+};
+var backspace2 = (state) => {
+  const derivedLogPos = deriveLogPos(state.visPos, state.input, state.dir);
+  const { levels } = fribidiFunctions_default.friBidiResult(state.input, state.dir);
+  if (isLTR(derivedLogPos[0], levels) && isRTL(derivedLogPos[1], levels)) {
+    return state;
+  }
+  const logPosToRemove = state.lean === "left" ? derivedLogPos[1] - 1 : derivedLogPos[0] - 1;
+  return logPosToRemove >= 0 ? {
+    ...state,
+    input: remove(logPosToRemove, state.input),
+    visPos: isLTR(logPosToRemove, levels) ? state.visPos - 1 : state.visPos
+  } : state;
+};
+var deleteKey2 = (state) => {
+  const derivedLogPos = deriveLogPos(state.visPos, state.input, state.dir);
+  const { levels } = fribidiFunctions_default.friBidiResult(state.input, state.dir);
+  if (isRTL(derivedLogPos[0], levels) && isLTR(derivedLogPos[1], levels)) {
+    return state;
+  }
+  const logPosToRemove = state.lean === "left" ? derivedLogPos[1] : derivedLogPos[0];
+  return logPosToRemove < [...state.input].length ? {
+    ...state,
+    input: remove(logPosToRemove, state.input),
+    visPos: isRTL(logPosToRemove, levels) ? state.visPos - 1 : state.visPos
+  } : state;
+};
+var insertCharSpecial = (char, type, state) => {
+  const derivedLogPos = deriveLogPos(state.visPos, state.input, state.dir);
+  const level = getCharLevel(char, derivedLogPos[0], state.input, state.dir);
+  const [startChar, endChar] = controlType[type][level % 2];
+  if (!(level % 2)) {
+    return {
+      ...state,
+      input: insert(startChar + char + endChar, derivedLogPos[0], state.input),
+      visPos: visPosRight(state.visPos, state.input)
+    };
+  } else if (level % 2) {
+    return {
+      ...state,
+      input: insert(startChar + char + endChar, derivedLogPos[1], state.input),
+      visPos: visPosLeft(state.visPos)
+    };
+  } else {
+    throw new Error("Invalid level");
+  }
+};
+var arrowLeft2 = (state) => ({
+  ...state,
+  visPos: visPosLeft(state.visPos, 1),
+  lean: "left"
+});
+var arrowRight2 = (state) => ({
+  ...state,
+  visPos: visPosRight(state.visPos, state.input),
+  lean: "right"
+});
+var home2 = (state) => {
+  const { dir } = fribidiFunctions_default.friBidiResult(state.input, state.dir);
+  return {
+    ...state,
+    visPos: dir === "ltr" ? 0 : [...state.input].length
+  };
+};
+var end2 = (state) => {
+  const { dir } = fribidiFunctions_default.friBidiResult(state.input, state.dir);
+  return {
+    ...state,
+    visPos: dir === "ltr" ? [...state.input].length : 0
+  };
+};
+var click2 = (clickedVisPos, side, state) => {
+  if (side === "left") {
+    return { ...state, visPos: clickedVisPos, lean: side };
+  } else if (side === "right") {
+    return { ...state, visPos: clickedVisPos + 1, lean: side };
+  } else {
+    throw new Error("Invalid side");
+  }
+};
+var clickOnLog2 = (clickedLogPos, side, state) => {
+  const { levels } = fribidiFunctions_default.friBidiResult(state.input, state.dir);
   const charDir = levels[clickedLogPos] % 2;
   if (side === "left") {
     return {
@@ -1017,9 +937,172 @@ var visClickOnLog = (clickedLogPos, side, state) => {
     throw new Error("Invalid side");
   }
 };
-var visClickOnLog2 = (clickedLogPos, side, state) => {
+var vis_default = {
+  arrowLeft: arrowLeft2,
+  arrowRight: arrowRight2,
+  insertChar: insertChar2,
+  backspace: backspace2,
+  deleteKey: deleteKey2,
+  click: click2,
+  home: home2,
+  end: end2,
+  debug: { clickOnLog: clickOnLog2, insertCharSpecial }
+};
+
+// src/vis2.ts
+var insertChar3 = (char, state) => {
+  if (state.mode === "log") {
+    const tempState = log_default.insertChar(char, {
+      input: state.input,
+      dir: state.dir,
+      logPos: state.logPos[0]
+    });
+    return {
+      ...state,
+      input: tempState.input,
+      visPos: deriveVisPos(tempState.logPos, tempState.input, tempState.dir),
+      logPos: [tempState.logPos, tempState.logPos],
+      lean: getCharLevel(char, tempState.logPos, tempState.input, tempState.dir) % 2 ? "left" : "right"
+    };
+  } else {
+    const tempState = vis_default.insertChar(char, {
+      input: state.input,
+      dir: state.dir,
+      visPos: state.visPos[0],
+      lean: state.lean
+    });
+    const logPos = deriveLogPos(
+      tempState.visPos,
+      tempState.input,
+      tempState.dir
+    )[tempState.lean === "left" ? 0 : 1];
+    const newCharLevel = getCharLevel(
+      char,
+      logPos,
+      tempState.input,
+      tempState.dir
+    );
+    const mode = logPos === [...tempState.input].length ? "log" : "vis";
+    return {
+      ...state,
+      input: tempState.input,
+      visPos: [tempState.visPos, tempState.visPos],
+      logPos: [logPos, logPos],
+      lean: tempState.lean,
+      mode
+    };
+  }
+};
+var backspace3 = (state) => {
+  if (state.mode === "vis") {
+    if (state.visPos[0] !== state.visPos[1]) throw new Error("Invalid visPos");
+    const tempState = vis_default.backspace({
+      input: state.input,
+      dir: state.dir,
+      visPos: state.visPos[0],
+      lean: state.lean
+    });
+    return {
+      ...state,
+      input: tempState.input,
+      visPos: [tempState.visPos, tempState.visPos],
+      logPos: deriveLogPos(tempState.visPos, tempState.input, tempState.dir)
+    };
+  } else {
+    if (state.logPos[0] !== state.logPos[1]) throw new Error("Invalid logPos");
+    const tempState = log_default.backspace({
+      input: state.input,
+      dir: state.dir,
+      logPos: state.logPos[0]
+    });
+    return {
+      ...state,
+      input: tempState.input,
+      visPos: deriveVisPos(tempState.logPos, tempState.input, tempState.dir),
+      logPos: [tempState.logPos, tempState.logPos]
+    };
+  }
+};
+var deleteKey3 = (state) => {
+  const derivedLogPos = deriveLogPos(state.visPos[0], state.input, state.dir);
+  const { levels } = fribidiFunctions_default.friBidiResult(state.input, state.dir);
+  if (isRTL(derivedLogPos[0], levels) && isLTR(derivedLogPos[1], levels)) {
+    return state;
+  }
+  const logPosToRemove = state.lean === "left" ? derivedLogPos[1] : derivedLogPos[0];
+  const visPos = isRTL(logPosToRemove, levels) ? state.visPos[0] - 1 : state.visPos[0];
+  return {
+    ...state,
+    input: remove(logPosToRemove, state.input),
+    visPos: [visPos, visPos]
+  };
+};
+var arrowLeft3 = (state) => {
+  const primaryVisPos = state.visPos[state.lean === "right" ? 0 : 1];
+  const newVisPos = visPosLeft(primaryVisPos);
+  return {
+    ...state,
+    visPos: [newVisPos, newVisPos],
+    logPos: deriveLogPos(newVisPos, state.input, state.dir),
+    lean: "left",
+    mode: "vis"
+  };
+};
+var arrowRight3 = (state) => {
+  const primaryVisPos = state.visPos[state.lean === "right" ? 0 : 1];
+  const newVisPos = visPosRight(primaryVisPos, state.input);
+  return {
+    ...state,
+    visPos: [newVisPos, newVisPos],
+    logPos: deriveLogPos(newVisPos, state.input, state.dir),
+    lean: "right",
+    mode: "vis"
+  };
+};
+var home3 = (state) => {
+  const tempState = vis_default.home({
+    input: state.input,
+    dir: state.dir,
+    visPos: state.visPos[0],
+    lean: state.lean
+  });
+  return {
+    ...state,
+    visPos: [tempState.visPos, tempState.visPos],
+    logPos: deriveLogPos(tempState.visPos, tempState.input, tempState.dir),
+    lean: tempState.lean,
+    mode: "vis"
+  };
+};
+var end3 = (state) => {
+  const tempState = vis_default.end({
+    input: state.input,
+    dir: state.dir,
+    visPos: state.visPos[0],
+    lean: state.lean
+  });
+  return {
+    ...state,
+    visPos: [tempState.visPos, tempState.visPos],
+    logPos: deriveLogPos(tempState.visPos, tempState.input, tempState.dir),
+    lean: tempState.lean,
+    mode: "vis"
+  };
+};
+var click3 = (clickedVisPos, side, state) => {
+  const newVisPos = side === "left" ? clickedVisPos : side === "right" ? clickedVisPos + 1 : null;
+  if (newVisPos === null) throw new Error("Invalid side");
+  return {
+    ...state,
+    visPos: [newVisPos, newVisPos],
+    logPos: deriveLogPos(newVisPos, state.input, state.dir),
+    lean: side,
+    mode: "vis"
+  };
+};
+var clickOnLog3 = (clickedLogPos, side, state) => {
   if (!["left", "right"].includes(side)) throw new Error("Invalid side");
-  const { levels } = fribidiResult(state.input, state.dir);
+  const { levels } = fribidiFunctions_default.friBidiResult(state.input, state.dir);
   const charDir = levels[clickedLogPos] % 2;
   const newVisPos = deriveVisPos(
     side === "left" ? clickedLogPos : clickedLogPos + 1,
@@ -1033,53 +1116,26 @@ var visClickOnLog2 = (clickedLogPos, side, state) => {
     lean: side
   };
 };
-var log = {
-  arrowLeft: logArrowLeft,
-  arrowRight: logArrowRight,
-  insertChar: logInsertChar,
-  backspace: logBackspace,
-  delete: logDelete,
-  click: logClick,
-  debug: { clickOnLog: logClickOnLog }
+var vis2_default = {
+  arrowLeft: arrowLeft3,
+  arrowRight: arrowRight3,
+  insertChar: insertChar3,
+  backspace: backspace3,
+  deleteKey: deleteKey3,
+  home: home3,
+  end: end3,
+  click: click3,
+  debug: { clickOnLog: clickOnLog3 }
 };
-var vis = {
-  arrowLeft: visArrowLeft,
-  arrowRight: visArrowRight,
-  insertChar: visInsertChar,
-  backspace: visBackspace,
-  delete: visDelete,
-  click: visClick,
-  debug: { clickOnLog: visClickOnLog, insertCharSpecial: visInsertCharSpecial }
-};
-var vis2 = {
-  arrowLeft: visArrowLeft2,
-  arrowRight: visArrowRight2,
-  insertChar: visInsertChar2,
-  backspace: visBackspace2,
-  delete: visDelete2,
-  click: visClick2,
-  debug: {
-    clickOnLog: visClickOnLog2,
-    insertCharSpecial: visInsertCharSpecial
-  }
-};
+
+// src/index.ts
+var fribidiResult = fribidiFunctions_default.friBidiResult;
 export {
-  ALM,
-  FSI,
-  LRE,
-  LRI,
-  LRM,
-  LRO,
-  PDF,
-  PDI,
-  RLE,
-  RLI,
-  RLM,
-  RLO,
+  BidiControls,
   deriveLogPos,
   deriveVisPos,
   fribidiResult,
-  log,
-  vis,
-  vis2
+  log_default as log,
+  vis_default as vis,
+  vis2_default as vis2
 };
